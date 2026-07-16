@@ -771,7 +771,7 @@ export default function CloudStorageApp() {
                 </div>
                 <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
                   {VAULT_FILES.map((item) => {
-                    const meta = TYPES[item.type];
+                    const meta = TYPES[item.type] || TYPES.doc;
                     const Icon = meta.icon;
                     const isMedia = meta.kind === "media";
                     return (
@@ -807,7 +807,7 @@ export default function CloudStorageApp() {
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5">
                       {pinnedItems.map((item) => {
-                        const meta = TYPES[item.type];
+                        const meta = TYPES[item.type] || TYPES.doc;
                         const Icon = meta.icon;
                         return (
                           <div
@@ -881,7 +881,7 @@ export default function CloudStorageApp() {
                     <p className={`text-xs uppercase tracking-wider ${d.textMuted} font-semibold mb-3`}>Files</p>
                     <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
                     {filteredFiles.map((item) => {
-                  const meta = TYPES[item.type];
+                  const meta = TYPES[item.type] || TYPES.doc;
                   const Icon = meta.icon;
                   const isMedia = meta.kind === "media";
                   return (
@@ -944,7 +944,7 @@ export default function CloudStorageApp() {
             ) : (
               <div className="flex flex-col gap-1">
                 {items.map((item) => {
-                  const meta = TYPES[item.type];
+                  const meta = TYPES[item.type] || TYPES.doc;
                   const Icon = meta.icon;
                   return (
                     <div

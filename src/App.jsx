@@ -179,7 +179,29 @@ function Badge({ color, icon: Icon, label }) {
 export default function CloudStorageApp() {
   const [theme, setTheme] = useState("dark");
   const d = THEME[theme];
-  const [authUser, setAuthUser] = useState(null);
+  const [authUser, setAuthUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem("ethix_auth");
+      if (!saved) return null;
+      const parsed = JSON.parse(saved);
+      const claims = decodeJWT(parsed.idToken);
+      if (claims.exp && claims.exp * 1000 > Date.now()) return parsed;
+      localStorage.removeItem("ethix_auth");
+      return null;
+    } catch {
+      return null;
+    }
+  });
+
+  const handleLogin = (user) => {
+    localStorage.setItem("ethix_auth", JSON.stringify(user));
+    setAuthUser(user);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("ethix_auth");
+    setAuthUser(null);
+  };
   const userInitials = authUser?.name
     ? authUser.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()
     : "?";
@@ -254,8 +276,11 @@ export default function CloudStorageApp() {
   };
 
   const q = searchQuery.trim().toLowerCase();
-  const filteredFolders = q ? folders.filter((f) => f.name.toLowerCase().includes(q)) : folders;
-  const filteredFiles = q ? files.filter((f) => f.name.toLowerCase().includes(q)) : files;
+  const isStarredView = activeNav === "starred";
+  const baseFolders = isStarredView ? folders.filter((f) => pinnedIds.has(f.id)) : folders;
+  const baseFiles = isStarredView ? files.filter((f) => pinnedIds.has(f.id)) : files;
+  const filteredFolders = q ? baseFolders.filter((f) => f.name.toLowerCase().includes(q)) : baseFolders;
+  const filteredFiles = q ? baseFiles.filter((f) => f.name.toLowerCase().includes(q)) : baseFiles;
   const items = [...filteredFolders, ...filteredFiles];
   const imageItems = files.filter((f) => f.type === "image");
   const noResults = q && filteredFolders.length === 0 && filteredFiles.length === 0;
@@ -541,7 +566,7 @@ export default function CloudStorageApp() {
   const currentPageLabel = NAV.find((n) => n.id === activeNav)?.label || "My Files";
 
   if (!authUser) {
-    return <LoginScreen d={d} theme={theme} setTheme={setTheme} onLogin={setAuthUser} />;
+    return <LoginScreen d={d} theme={theme} setTheme={setTheme} onLogin={handleLogin} />;
   }
 
   return (
@@ -669,7 +694,7 @@ export default function CloudStorageApp() {
                 <p className={`text-xs ${d.textMuted} truncate`}>{authUser.email}</p>
               </div>
             </button>
-            <button onClick={() => setAuthUser(null)} className={`p-1.5 rounded-lg ${d.textMuted} hover:text-red-400 hover:bg-red-500/10 transition shrink-0`} title="Log out">
+            <button onClick={handleLogout} className={`p-1.5 rounded-lg ${d.textMuted} hover:text-red-400 hover:bg-red-500/10 transition shrink-0`} title="Log out">
               <LogOut size={16} />
             </button>
           </div>
@@ -758,7 +783,7 @@ export default function CloudStorageApp() {
           </div>
 
           <div className="flex items-center justify-between px-6 py-4">
-            <h1 className={`hidden md:block text-xl font-bold ${d.textPrimary}`}>{accountView ? "Your Account" : "My Files"}</h1>
+            <h1 className={`hidden md:block text-xl font-bold ${d.textPrimary}`}>{accountView ? "Your Account" : currentPageLabel}</h1>
           </div>
 
           <div className="flex-1 overflow-y-auto no-scrollbar px-6 pb-6">
@@ -775,7 +800,7 @@ export default function CloudStorageApp() {
                 </button>
               </div>
             ) : accountView ? (
-              <AccountPage d={d} theme={theme} onBack={() => setAccountView(false)} authUser={authUser} userInitials={userInitials} onLogout={() => setAuthUser(null)} totalStorageGB={totalStorageGB} />
+              <AccountPage d={d} theme={theme} onBack={() => setAccountView(false)} authUser={authUser} userInitials={userInitials} onLogout={handleLogout} totalStorageGB={totalStorageGB} />
             ) : vaultUnlocked ? (
               <>
                 <button
@@ -819,7 +844,7 @@ export default function CloudStorageApp() {
               </>
             ) : view === "grid" ? (
               <>
-                {pinnedItems.length > 0 && !q && (
+                {pinnedItems.length > 0 && !q && !isStarredView && (
                   <div className="mb-6">
                     <p className={`text-xs uppercase tracking-wider ${d.textMuted} font-semibold mb-3 flex items-center gap-1.5`}>
                       <Pin size={11} className="text-orange-400" /> Pinned

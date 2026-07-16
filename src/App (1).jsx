@@ -71,6 +71,23 @@ function decodeJWT(token) {
   }
 }
 
+// ── API config ──────────────────────────────────────────────────
+const API_BASE_URL = "https://1ge9pIlmm10.execute-api.eu-north-1.amazonaws.com";
+
+async function apiRequest(method, path, token, body) {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: token,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  return data;
+}
+
 const THEME = {
   dark: {
     bgGradient: "from-zinc-950 via-black to-zinc-950",
@@ -129,23 +146,6 @@ const TYPES = {
   video: { icon: Film, kind: "media" },
 };
 
-const INITIAL_FOLDERS = [
-  { id: "f1", type: "folder", name: "Engine Logs", meta: "24 items · Jul 10" },
-  { id: "f2", type: "folder", name: "Certificates", meta: "8 items · Jun 28" },
-  { id: "f3", type: "folder", name: "Voyage Photos", meta: "156 items · Jul 12" },
-  { id: "f4", type: "folder", name: "Personal", meta: "12 items · Jul 1" },
-];
-
-const FILES = [
-  { id: "i1", type: "image", name: "sunset-arrival.jpg", size: "4.2 MB", uploaded: "Jul 12, 2026 · 14:20" },
-  { id: "i2", type: "image", name: "port-rotterdam.png", size: "6.8 MB", uploaded: "Jul 11, 2026 · 09:05" },
-  { id: "v1", type: "video", name: "voyage-recap.mp4", size: "184 MB", uploaded: "Jul 9, 2026 · 20:11" },
-  { id: "p1", type: "pdf", name: "engine-manual.pdf", size: "12.4 MB", uploaded: "Jun 30, 2026 · 11:40" },
-  { id: "p2", type: "pdf", name: "contract-2026.pdf", size: "980 KB", uploaded: "Jun 20, 2026 · 08:15" },
-  { id: "d1", type: "doc", name: "shift-notes.docx", size: "128 KB", uploaded: "Jul 8, 2026 · 17:30" },
-  { id: "s1", type: "sheet", name: "expenses-june.xlsx", size: "240 KB", uploaded: "Jun 30, 2026 · 22:00" },
-];
-
 const NAV = [
   { id: "files", label: "My Files", icon: HardDrive },
   { id: "shared", label: "Shared", icon: Users2 },
@@ -184,7 +184,10 @@ export default function CloudStorageApp() {
     ? authUser.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()
     : "?";
 
-  const [folders, setFolders] = useState(INITIAL_FOLDERS);
+  const [folders, setFolders] = useState([]);
+  const [files, setFiles] = useState([]);
+  const [itemsLoading, setItemsLoading] = useState(true);
+  const [itemsError, setItemsError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -252,11 +255,11 @@ export default function CloudStorageApp() {
 
   const q = searchQuery.trim().toLowerCase();
   const filteredFolders = q ? folders.filter((f) => f.name.toLowerCase().includes(q)) : folders;
-  const filteredFiles = q ? FILES.filter((f) => f.name.toLowerCase().includes(q)) : FILES;
+  const filteredFiles = q ? files.filter((f) => f.name.toLowerCase().includes(q)) : files;
   const items = [...filteredFolders, ...filteredFiles];
-  const imageItems = FILES.filter((f) => f.type === "image");
+  const imageItems = files.filter((f) => f.type === "image");
   const noResults = q && filteredFolders.length === 0 && filteredFiles.length === 0;
-  const pinnedItems = [...folders, ...FILES].filter((i) => pinnedIds.has(i.id));
+  const pinnedItems = [...folders, ...files].filter((i) => pinnedIds.has(i.id));
 
   useEffect(() => {
     if (folderModalOpen) folderNameRef.current?.focus();
@@ -279,20 +282,23 @@ export default function CloudStorageApp() {
   }, [uploads.length]);
 
   const handleFileSelect = (e) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length === 0) return;
-    const picked = files.map((f, i) => ({ id: "u" + Date.now() + i, name: f.name, progress: 0 }));
-    setUploads((prev) => [...prev, ...picked]);
+    const pickedFiles = Array.from(e.target.files || []);
+    if (pickedFiles.length === 0) return;
     setUploadMinimized(false);
+    pickedFiles.forEach((file) => realUpload(file));
     e.target.value = "";
   };
 
-  const confirmNewFolder = () => {
-    if (newFolderName.trim()) {
-      setFolders((prev) => [{ id: "f" + Date.now(), type: "folder", name: newFolderName.trim(), meta: "0 items · just now" }, ...prev]);
-    }
+  const confirmNewFolder = async () => {
+    const name = newFolderName.trim();
     setFolderModalOpen(false);
     setNewFolderName("");
+    if (!name) return;
+    try {
+      await realCreateFolder(name);
+    } catch (err) {
+      alert(`Could not create folder: ${err.message}`);
+    }
   };
 
   const openNewMenu = (e, align = "left") => {
@@ -301,6 +307,104 @@ export default function CloudStorageApp() {
     const x = align === "right" ? r.right - menuWidth : r.left;
     setNewMenuPos({ x: Math.max(8, Math.min(x, window.innerWidth - menuWidth - 8)), y: r.bottom + 6, width: r.width });
     setNewMenuOpen(true);
+  };
+
+  // ── Real backend integration ────────────────────────────────
+  const fetchItems = async () => {
+    setItemsLoading(true);
+    setItemsError("");
+    try {
+      const data = await apiRequest("GET", "/items", authUser.idToken);
+      const allItems = data.items || [];
+      setFolders(
+        allItems
+          .filter((i) => i.type === "folder")
+          .map((i) => ({ ...i, id: i.itemId, meta: i.createdAt ? new Date(i.createdAt).toLocaleDateString() : "" }))
+      );
+      setFiles(
+        allItems
+          .filter((i) => i.type !== "folder")
+          .map((i) => ({
+            ...i,
+            id: i.itemId,
+            size: i.size ? `${(i.size / 1024 / 1024).toFixed(1)} MB` : "—",
+            uploaded: i.createdAt ? new Date(i.createdAt).toLocaleString() : "",
+          }))
+      );
+    } catch (err) {
+      setItemsError(err.message);
+    } finally {
+      setItemsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (authUser) fetchItems();
+  }, [authUser]);
+
+  const realCreateFolder = async (name) => {
+    const data = await apiRequest("POST", "/folders", authUser.idToken, { name });
+    setFolders((prev) => [{ ...data.item, id: data.item.itemId, meta: "just now" }, ...prev]);
+  };
+
+  const realUpload = async (file) => {
+    const uploadId = "u" + Date.now() + Math.random();
+    setUploads((prev) => [...prev, { id: uploadId, name: file.name, progress: 0 }]);
+    try {
+      const { uploadUrl, item } = await apiRequest("POST", "/upload-url", authUser.idToken, {
+        fileName: file.name,
+        fileType: file.type,
+        size: file.size,
+      });
+
+      await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("PUT", uploadUrl);
+        xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            const pct = Math.round((e.loaded / e.total) * 100);
+            setUploads((prev) => prev.map((u) => (u.id === uploadId ? { ...u, progress: pct } : u)));
+          }
+        };
+        xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error("Upload failed")));
+        xhr.onerror = () => reject(new Error("Upload failed"));
+        xhr.send(file);
+      });
+
+      setUploads((prev) => prev.map((u) => (u.id === uploadId ? { ...u, progress: 100 } : u)));
+      setFiles((prev) => [
+        { ...item, id: item.itemId, size: `${(file.size / 1024 / 1024).toFixed(1)} MB`, uploaded: "just now" },
+        ...prev,
+      ]);
+    } catch (err) {
+      setUploads((prev) => prev.filter((u) => u.id !== uploadId));
+      alert(`Upload failed: ${err.message}`);
+    }
+  };
+
+  const realDownload = async (item) => {
+    try {
+      const data = await apiRequest("GET", `/download-url/${item.itemId || item.id}`, authUser.idToken);
+      const a = document.createElement("a");
+      a.href = data.downloadUrl;
+      a.download = data.name || item.name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (err) {
+      alert(`Download failed: ${err.message}`);
+    }
+  };
+
+  const realDelete = async (item) => {
+    try {
+      await apiRequest("DELETE", `/items/${item.itemId || item.id}`, authUser.idToken);
+      if (item.type === "folder") setFolders((prev) => prev.filter((f) => f.id !== item.id && f.itemId !== item.itemId));
+      else setFiles((prev) => prev.filter((f) => f.id !== item.id && f.itemId !== item.itemId));
+    } catch (err) {
+      alert(`Delete failed: ${err.message}`);
+    }
   };
 
   const togglePin = (item) => {
@@ -396,13 +500,15 @@ export default function CloudStorageApp() {
 
   const handleDownload = (item) => {
     if (item.type === "folder") {
+      // Folder zip-download needs a dedicated Lambda (zips S3 objects server-side) - not built yet.
+      // Still simulated here so the UX is visible; wire this up once that Lambda exists.
       setZippingName(item.name);
       setTimeout(() => {
         triggerBlobDownload(`${item.name}.zip`, `Placeholder zip contents for ${item.name}`, "application/zip");
         setZippingName(null);
       }, 1400);
     } else {
-      triggerBlobDownload(item.name, `Placeholder contents for ${item.name}`, "application/octet-stream");
+      realDownload(item);
     }
   };
 
@@ -637,7 +743,19 @@ export default function CloudStorageApp() {
           </div>
 
           <div className="flex-1 overflow-y-auto no-scrollbar px-6 pb-6">
-            {accountView ? (
+            {itemsLoading ? (
+              <div className="flex flex-col items-center justify-center py-24">
+                <Loader2 size={24} className={`animate-spin ${d.textMuted} mb-3`} />
+                <p className={`text-sm ${d.textMuted}`}>Loading your files…</p>
+              </div>
+            ) : itemsError ? (
+              <div className="flex flex-col items-center justify-center py-24">
+                <p className="text-sm text-red-400 mb-3">Could not load files: {itemsError}</p>
+                <button onClick={fetchItems} className="text-xs rounded-lg px-3 py-1.5 bg-orange-500/10 border border-orange-500/30 text-orange-400">
+                  Try again
+                </button>
+              </div>
+            ) : accountView ? (
               <AccountPage d={d} theme={theme} onBack={() => setAccountView(false)} authUser={authUser} userInitials={userInitials} onLogout={() => setAuthUser(null)} />
             ) : vaultUnlocked ? (
               <>
@@ -985,7 +1103,7 @@ export default function CloudStorageApp() {
             <MenuItem icon={Move} label="Move" d={d} onClick={() => setMenu(null)} />
             <MenuItem icon={Share2} label="Copy shareable link" d={d} onClick={() => { openShare(menu.item); setMenu(null); }} />
             <div className={`h-px my-1 mx-2 ${d.divider} border-t`} />
-            <MenuItem icon={Trash2} label="Delete" d={d} danger onClick={() => setMenu(null)} />
+            <MenuItem icon={Trash2} label="Delete" d={d} danger onClick={() => { realDelete(menu.item); setMenu(null); }} />
           </div>
         </>
       )}
@@ -1274,6 +1392,16 @@ function LoginScreen({ d, theme, setTheme, onLogin }) {
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
         .font-sans { font-family: 'Inter', system-ui, sans-serif; }
         .liquid-glass { backdrop-filter: blur(28px) saturate(180%); -webkit-backdrop-filter: blur(28px) saturate(180%); }
+        .glass-sheen::before {
+          content: '';
+          position: absolute;
+          inset: 0;
+          border-radius: inherit;
+          background: linear-gradient(120deg, rgba(255,255,255,0.32) 0%, rgba(255,255,255,0.05) 30%, rgba(255,255,255,0) 55%, rgba(255,255,255,0.16) 100%);
+          box-shadow: inset 0 1px 1px rgba(255,255,255,0.4), inset 0 -12px 20px -14px rgba(0,0,0,0.35);
+          pointer-events: none;
+        }
+        .glass-sheen > * { position: relative; z-index: 1; }
         .app-root, .app-root * { -webkit-user-select: none; user-select: none; }
         .app-root input { -webkit-user-select: text; user-select: text; }
       `}</style>
@@ -1287,18 +1415,18 @@ function LoginScreen({ d, theme, setTheme, onLogin }) {
 
       <button
         onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-        className={`fixed top-4 right-4 z-10 p-2.5 rounded-xl ${d.inputBg} liquid-glass border ${d.border} ${d.textMuted}`}
+        className={`fixed top-4 right-4 z-10 p-2.5 rounded-xl ${d.inputBg} liquid-glass relative glass-sheen overflow-hidden border ${d.border} ${d.textMuted}`}
       >
         {theme === "dark" ? <Moon size={16} /> : <Sun size={16} />}
       </button>
 
-      <div className={`relative z-10 w-full max-w-sm rounded-2xl p-7 liquid-glass border ${d.border} shadow-xl shadow-black/40`} style={{ background: d.modalBg }}>
+      <div className={`relative z-10 w-full max-w-sm rounded-2xl p-7 liquid-glass relative glass-sheen overflow-hidden border ${d.border} shadow-xl shadow-black/40`} style={{ background: d.modalBg }}>
         <div className="flex items-center gap-2 justify-center mb-6">
           <span className={`text-lg font-extrabold tracking-tight ${d.textPrimary}`}>ethix<span className="text-orange-400">.cloud</span></span>
         </div>
 
         {mode !== "confirm" && (
-          <div className={`flex items-center gap-1 rounded-xl p-1 mb-6 ${d.inputBg} border ${d.border}`}>
+          <div className={`relative glass-sheen overflow-hidden flex items-center gap-1 rounded-xl p-1 mb-6 ${d.inputBg} border ${d.border}`}>
             <button
               onClick={() => { setMode("signin"); setError(""); }}
               className={`flex-1 rounded-lg py-2 text-sm font-medium transition ${mode === "signin" ? "bg-orange-500 text-black" : d.textMuted}`}

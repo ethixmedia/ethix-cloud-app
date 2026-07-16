@@ -387,12 +387,20 @@ export default function CloudStorageApp() {
   const realDownload = async (item) => {
     try {
       const data = await apiRequest("GET", `/download-url/${item.itemId || item.id}`, authUser.idToken);
+      // Fetch the real bytes ourselves rather than linking straight to S3 - browsers
+      // don't reliably force-download cross-origin links, but a same-origin blob
+      // URL always triggers a real download regardless of browser quirks.
+      const fileRes = await fetch(data.downloadUrl);
+      if (!fileRes.ok) throw new Error("Could not fetch file");
+      const blob = await fileRes.blob();
+      const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = data.downloadUrl;
+      a.href = blobUrl;
       a.download = data.name || item.name;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
     } catch (err) {
       alert(`Download failed: ${err.message}`);
     }
@@ -1245,13 +1253,13 @@ export default function CloudStorageApp() {
       )}
 
       {viewer?.type === "image" && (
-        <ImageViewer d={d} items={imageItems} index={viewer.index} onIndex={(i) => setViewer({ ...viewer, index: i, item: imageItems[i] })} onClose={() => setViewer(null)} authUser={authUser} />
+        <ImageViewer d={d} items={imageItems} index={viewer.index} onIndex={(i) => setViewer({ ...viewer, index: i, item: imageItems[i] })} onClose={() => setViewer(null)} authUser={authUser} onDownload={realDownload} onShare={openShare} />
       )}
 
       {viewer?.type === "video" && (
         <div className="fixed inset-0 fade-in z-50 flex items-center justify-center bg-black/70 liquid-glass" onClick={() => setViewer(null)}>
           <div className={`rounded-2xl w-full max-w-2xl overflow-hidden liquid-glass modal-anim border ${d.border} shadow-xl shadow-black/40`} style={{ background: d.modalBg }} onClick={(e) => e.stopPropagation()}>
-            <ViewerHeader name={viewer.item.name} onClose={() => setViewer(null)} d={d} />
+            <ViewerHeader name={viewer.item.name} onClose={() => setViewer(null)} d={d} onDownload={() => realDownload(viewer.item)} onShare={() => openShare(viewer.item)} />
             <div className="aspect-video flex items-center justify-center relative bg-gradient-to-br from-zinc-900 to-black">
               <button onClick={() => setVideoPlaying((p) => !p)} className="w-16 h-16 rounded-full flex items-center justify-center bg-white/10 hover:bg-white/20 transition">
                 {videoPlaying ? <Pause size={26} className="text-white" fill="white" /> : <Play size={26} className="text-white ml-1" fill="white" />}
@@ -1275,7 +1283,7 @@ export default function CloudStorageApp() {
       {viewer?.type === "pdf" && (
         <div className="fixed inset-0 fade-in z-50 flex items-center justify-center bg-black/70 liquid-glass" onClick={() => setViewer(null)}>
           <div className={`rounded-2xl w-full max-w-xl flex flex-col overflow-hidden liquid-glass modal-anim border ${d.border} shadow-xl shadow-black/40`} style={{ background: d.modalBg, maxHeight: "85vh" }} onClick={(e) => e.stopPropagation()}>
-            <ViewerHeader name={viewer.item.name} sub="Page 1 of 12" onClose={() => setViewer(null)} d={d} />
+            <ViewerHeader name={viewer.item.name} sub="Page 1 of 12" onClose={() => setViewer(null)} d={d} onDownload={() => realDownload(viewer.item)} onShare={() => openShare(viewer.item)} />
             <div className="flex-1 overflow-y-auto no-scrollbar p-6 flex justify-center bg-black/20">
               <div className="bg-white rounded-lg w-full max-w-sm p-6 flex flex-col gap-2.5 h-fit shadow-2xl">
                 {[95, 88, 92, 60, 0, 90, 84, 70, 0, 80, 55].map((w, i) =>
@@ -1718,7 +1726,7 @@ function DetailRow({ label, value, d }) {
   );
 }
 
-function ViewerHeader({ name, sub, onClose, d }) {
+function ViewerHeader({ name, sub, onClose, d, onDownload, onShare }) {
   return (
     <div className={`flex items-center justify-between px-5 py-3.5 border-b ${d.divider}`}>
       <div>
@@ -1726,15 +1734,19 @@ function ViewerHeader({ name, sub, onClose, d }) {
         {sub && <p className={`text-xs font-mono mt-0.5 ${d.textMuted}`}>{sub}</p>}
       </div>
       <div className="flex items-center gap-3">
-        <Download size={16} className={`${d.textMuted} cursor-pointer hover:text-orange-400`} />
-        <Share2 size={16} className={`${d.textMuted} cursor-pointer hover:text-orange-400`} />
+        <button onClick={onDownload} className={`${d.textMuted} hover:text-orange-400 transition`}>
+          <Download size={16} />
+        </button>
+        <button onClick={onShare} className={`${d.textMuted} hover:text-orange-400 transition`}>
+          <Share2 size={16} />
+        </button>
         <button onClick={onClose} className={`${d.textMuted} hover:text-orange-400 active:scale-90 transition`}><X size={18} /></button>
       </div>
     </div>
   );
 }
 
-function ImageViewer({ items, index, onIndex, onClose, d, authUser }) {
+function ImageViewer({ items, index, onIndex, onClose, d, authUser, onDownload, onShare }) {
   const item = items[index];
   const [previewUrl, setPreviewUrl] = useState(null);
   const [loadError, setLoadError] = useState(false);
@@ -1758,7 +1770,7 @@ function ImageViewer({ items, index, onIndex, onClose, d, authUser }) {
   return (
     <div className="fixed inset-0 fade-in z-50 flex items-center justify-center bg-black/75 liquid-glass" onClick={onClose}>
       <div className={`rounded-2xl w-full max-w-2xl overflow-hidden liquid-glass modal-anim border ${d.border} shadow-xl shadow-black/40`} style={{ background: d.modalBg }} onClick={(e) => e.stopPropagation()}>
-        <ViewerHeader name={item.name} sub={`${item.size} · ${item.uploaded}`} onClose={onClose} d={d} />
+        <ViewerHeader name={item.name} sub={`${item.size} · ${item.uploaded}`} onClose={onClose} d={d} onDownload={() => onDownload(item)} onShare={() => onShare(item)} />
         <div className={`aspect-[4/3] flex items-center justify-center relative bg-gradient-to-br ${d.mediaGradient}`}>
           {index > 0 && (
             <button onClick={() => onIndex(index - 1)} className="absolute left-3 w-9 h-9 rounded-full flex items-center justify-center text-white bg-black/40 hover:bg-black/60 transition">

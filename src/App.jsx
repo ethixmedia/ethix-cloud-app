@@ -327,6 +327,7 @@ export default function CloudStorageApp() {
           .map((i) => ({
             ...i,
             id: i.itemId,
+            sizeBytes: i.size || 0,
             size: i.size ? `${(i.size / 1024 / 1024).toFixed(1)} MB` : "—",
             uploaded: i.createdAt ? new Date(i.createdAt).toLocaleString() : "",
           }))
@@ -374,7 +375,7 @@ export default function CloudStorageApp() {
 
       setUploads((prev) => prev.map((u) => (u.id === uploadId ? { ...u, progress: 100 } : u)));
       setFiles((prev) => [
-        { ...item, id: item.itemId, size: `${(file.size / 1024 / 1024).toFixed(1)} MB`, uploaded: "just now" },
+        { ...item, id: item.itemId, sizeBytes: file.size, size: `${(file.size / 1024 / 1024).toFixed(1)} MB`, uploaded: "just now" },
         ...prev,
       ]);
     } catch (err) {
@@ -406,6 +407,16 @@ export default function CloudStorageApp() {
       alert(`Delete failed: ${err.message}`);
     }
   };
+
+  const goToNav = (id) => {
+    setActiveNav(id);
+    setAccountView(false);
+    setVaultUnlocked(false);
+    setMobileNavOpen(false);
+  };
+
+  const totalStorageBytes = files.reduce((sum, f) => sum + (f.sizeBytes || 0), 0);
+  const totalStorageGB = (totalStorageBytes / 1024 / 1024 / 1024).toFixed(2);
 
   const togglePin = (item) => {
     setPinnedIds((prev) => {
@@ -608,7 +619,7 @@ export default function CloudStorageApp() {
               return (
                 <button
                   key={n.id}
-                  onClick={() => setActiveNav(n.id)}
+                  onClick={() => goToNav(n.id)}
                   className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition active:scale-95 border-l-2 ${
                     active
                       ? "bg-orange-500/10 border-orange-500 text-orange-400 font-medium"
@@ -632,10 +643,10 @@ export default function CloudStorageApp() {
           <div className="mt-2">
             <div className="flex items-center justify-between px-1 mb-2">
               <p className={`text-xs uppercase tracking-wider ${d.textMuted} font-semibold`}>Storage</p>
-              <span className={`text-xs ${d.textMuted} font-mono`}>42.6 GB</span>
+              <span className={`text-xs ${d.textMuted} font-mono`}>{totalStorageGB} GB</span>
             </div>
             <div className={`w-full h-2 rounded-full overflow-hidden ${d.inputBg} border ${d.border}`}>
-              <div className="h-full rounded-full bg-gradient-to-r from-orange-600 to-orange-400" style={{ width: "42%" }} />
+              <div className="h-full rounded-full bg-gradient-to-r from-orange-600 to-orange-400" style={{ width: `${Math.min(100, (totalStorageBytes / (5 * 1024 * 1024 * 1024)) * 100)}%` }} />
             </div>
           </div>
 
@@ -756,7 +767,7 @@ export default function CloudStorageApp() {
                 </button>
               </div>
             ) : accountView ? (
-              <AccountPage d={d} theme={theme} onBack={() => setAccountView(false)} authUser={authUser} userInitials={userInitials} onLogout={() => setAuthUser(null)} />
+              <AccountPage d={d} theme={theme} onBack={() => setAccountView(false)} authUser={authUser} userInitials={userInitials} onLogout={() => setAuthUser(null)} totalStorageGB={totalStorageGB} />
             ) : vaultUnlocked ? (
               <>
                 <button
@@ -1016,7 +1027,7 @@ export default function CloudStorageApp() {
             return (
               <button
                 key={n.id}
-                onClick={() => { setActiveNav(n.id); setMobileNavOpen(false); }}
+                onClick={() => goToNav(n.id)}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition active:scale-95 border-l-2 ${
                   active
                     ? "bg-orange-500/10 border-orange-500 text-orange-400 font-medium"
@@ -1234,7 +1245,7 @@ export default function CloudStorageApp() {
       )}
 
       {viewer?.type === "image" && (
-        <ImageViewer d={d} items={imageItems} index={viewer.index} onIndex={(i) => setViewer({ ...viewer, index: i, item: imageItems[i] })} onClose={() => setViewer(null)} />
+        <ImageViewer d={d} items={imageItems} index={viewer.index} onIndex={(i) => setViewer({ ...viewer, index: i, item: imageItems[i] })} onClose={() => setViewer(null)} authUser={authUser} />
       )}
 
       {viewer?.type === "video" && (
@@ -1600,7 +1611,7 @@ function BorderBeamCard({ d, children }) {
   );
 }
 
-function AccountPage({ d, theme, onBack, authUser, userInitials, onLogout }) {
+function AccountPage({ d, theme, onBack, authUser, userInitials, onLogout, totalStorageGB }) {
   return (
     <div className="max-w-2xl">
       <button onClick={onBack} className={`md:hidden flex items-center gap-2 text-sm mb-4 ${d.textSecondary} hover:text-orange-400 transition`}>
@@ -1632,7 +1643,7 @@ function AccountPage({ d, theme, onBack, authUser, userInitials, onLogout }) {
           </div>
           <div>
             <p className={`text-xs uppercase tracking-wider ${d.textMuted} font-semibold mb-1`}>Storage used</p>
-            <p className={`text-sm font-medium ${d.textPrimary} font-mono`}>42.6 GB</p>
+            <p className={`text-sm font-medium ${d.textPrimary} font-mono`}>{totalStorageGB} GB</p>
           </div>
           <div>
             <p className={`text-xs uppercase tracking-wider ${d.textMuted} font-semibold mb-1`}>Member since</p>
@@ -1723,8 +1734,27 @@ function ViewerHeader({ name, sub, onClose, d }) {
   );
 }
 
-function ImageViewer({ items, index, onIndex, onClose, d }) {
+function ImageViewer({ items, index, onIndex, onClose, d, authUser }) {
   const item = items[index];
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [loadError, setLoadError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPreviewUrl(null);
+    setLoadError(false);
+    apiRequest("GET", `/download-url/${item.itemId || item.id}?mode=preview`, authUser.idToken)
+      .then((data) => {
+        if (!cancelled) setPreviewUrl(data.downloadUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setLoadError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [item.id]);
+
   return (
     <div className="fixed inset-0 fade-in z-50 flex items-center justify-center bg-black/75 liquid-glass" onClick={onClose}>
       <div className={`rounded-2xl w-full max-w-2xl overflow-hidden liquid-glass modal-anim border ${d.border} shadow-xl shadow-black/40`} style={{ background: d.modalBg }} onClick={(e) => e.stopPropagation()}>
@@ -1735,7 +1765,13 @@ function ImageViewer({ items, index, onIndex, onClose, d }) {
               <ChevronLeft size={18} />
             </button>
           )}
-          <ImageIcon size={40} className={d.placeholderText} />
+          {loadError ? (
+            <ImageIcon size={40} className={d.placeholderText} />
+          ) : previewUrl ? (
+            <img src={previewUrl} alt={item.name} className="max-w-full max-h-full object-contain" />
+          ) : (
+            <Loader2 size={28} className={`animate-spin ${d.placeholderText}`} />
+          )}
           {index < items.length - 1 && (
             <button onClick={() => onIndex(index + 1)} className="absolute right-3 w-9 h-9 rounded-full flex items-center justify-center text-white bg-black/40 hover:bg-black/60 transition">
               <ChevronRight size={18} />

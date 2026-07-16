@@ -72,7 +72,7 @@ function decodeJWT(token) {
 }
 
 // ── API config ──────────────────────────────────────────────────
-const API_BASE_URL = "https://1ge9pIlmm10.execute-api.eu-north-1.amazonaws.com";
+const API_BASE_URL = "https://1ge9plmm10.execute-api.eu-north-1.amazonaws.com";
 
 async function apiRequest(method, path, token, body) {
   const res = await fetch(`${API_BASE_URL}${path}`, {

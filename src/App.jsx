@@ -341,6 +341,7 @@ export default function CloudStorageApp() {
     try {
       const data = await apiRequest("GET", "/items", authUser.idToken);
       const allItems = data.items || [];
+      setPinnedIds(new Set(allItems.filter((i) => i.pinned).map((i) => i.itemId)));
       setFolders(
         allItems
           .filter((i) => i.type === "folder")
@@ -451,13 +452,25 @@ export default function CloudStorageApp() {
   const totalStorageBytes = files.reduce((sum, f) => sum + (f.sizeBytes || 0), 0);
   const totalStorageGB = (totalStorageBytes / 1024 / 1024 / 1024).toFixed(2);
 
-  const togglePin = (item) => {
+  const togglePin = async (item) => {
+    const willBePinned = !pinnedIds.has(item.id);
     setPinnedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(item.id)) next.delete(item.id);
-      else next.add(item.id);
+      if (willBePinned) next.add(item.id);
+      else next.delete(item.id);
       return next;
     });
+    try {
+      await apiRequest("PATCH", `/items/${item.id}/pin`, authUser.idToken, { pinned: willBePinned });
+    } catch (err) {
+      setPinnedIds((prev) => {
+        const next = new Set(prev);
+        if (willBePinned) next.delete(item.id);
+        else next.add(item.id);
+        return next;
+      });
+      alert(`Failed to update pin: ${err.message}`);
+    }
   };
 
   const toggleOffline = (item) => {

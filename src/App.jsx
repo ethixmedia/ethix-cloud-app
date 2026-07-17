@@ -314,6 +314,44 @@ export default function CloudStorageApp() {
     e.target.value = "";
   };
 
+  // ── Drag-and-drop upload ──────────────────────────────────────
+  // Note: folders aren't real containers yet (no parentId/nesting), so every
+  // drop uploads to the account root regardless of where it's dropped -
+  // dropping directly on a folder tile will behave the same as empty space
+  // until folder nesting is built.
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const dragCounterRef = useRef(0);
+
+  const handleDragEnter = (e) => {
+    e.preventDefault();
+    if (accountView) return;
+    if (e.dataTransfer.types.includes("Files")) {
+      dragCounterRef.current += 1;
+      setIsDraggingFile(true);
+    }
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+    if (dragCounterRef.current === 0) setIsDraggingFile(false);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    dragCounterRef.current = 0;
+    setIsDraggingFile(false);
+    if (accountView) return;
+    const droppedFiles = Array.from(e.dataTransfer.files || []);
+    if (droppedFiles.length === 0) return;
+    setUploadMinimized(false);
+    droppedFiles.forEach((file) => realUpload(file));
+  };
+
   const confirmNewFolder = async () => {
     const name = newFolderName.trim();
     setFolderModalOpen(false);
@@ -717,7 +755,19 @@ export default function CloudStorageApp() {
         <main
           className={`flex-1 flex flex-col overflow-hidden rounded-2xl liquid-glass relative glass-sheen border ${d.border} shadow-xl shadow-black/40`}
           style={{ background: d.panelBg }}
+          onDragEnter={handleDragEnter}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
         >
+          {isDraggingFile && !accountView && (
+            <div className="absolute inset-0 z-30 flex items-center justify-center rounded-2xl border-2 border-dashed border-orange-400 bg-black/60 backdrop-blur-sm pointer-events-none">
+              <div className="flex flex-col items-center gap-2">
+                <Upload size={28} className="text-orange-400" />
+                <p className="text-sm font-semibold text-orange-200">Drop files to upload to My Files</p>
+              </div>
+            </div>
+          )}
           <div className={`flex items-center gap-4 px-6 py-4 border-b ${d.divider}`}>
             <div className="md:hidden flex flex-col leading-tight select-none cursor-pointer" onClick={handleLogoTap}>
               <span className={`text-xs font-extrabold tracking-tight ${d.textPrimary}`}>ethix<span className="text-orange-400">.cloud</span></span>
@@ -875,7 +925,7 @@ export default function CloudStorageApp() {
                             onTouchMove={handlePressEnd}
                             onMouseDown={(e) => handlePressStart(e, item)}
                             onMouseUp={handlePressEnd}
-                            onContextMenu={(e) => e.preventDefault()}
+                            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); openMenuAt(e.clientX - 190, e.clientY + 10, item); }}
                             className={`flex items-center gap-2.5 rounded-xl px-3 py-2.5 transition cursor-pointer group relative border ${d.border} liquid-glass ${d.borderHover}`}
                             style={{ background: d.cardBg }}
                           >
@@ -1012,7 +1062,7 @@ export default function CloudStorageApp() {
                       onTouchMove={handlePressEnd}
                       onMouseDown={(e) => handlePressStart(e, item)}
                       onMouseUp={handlePressEnd}
-                      onContextMenu={(e) => e.preventDefault()}
+                      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); openMenuAt(e.clientX - 190, e.clientY + 10, item); }}
                       className={`flex items-center gap-4 px-3 py-2.5 rounded-xl transition cursor-pointer group ${d.hoverBg}`}
                     >
                       <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${meta.kind === "media" ? `bg-gradient-to-br ${d.mediaGradient}` : "bg-orange-500/10"}`}>
@@ -1623,7 +1673,7 @@ function TiltCard({ children, className, style, onClick, onLongPress }) {
       onTouchMove={onLongPress ? clearPressTimer : undefined}
       onMouseDown={onLongPress ? handlePressStart : undefined}
       onMouseUp={onLongPress ? clearPressTimer : undefined}
-      onContextMenu={onLongPress ? (e) => e.preventDefault() : undefined}
+      onContextMenu={onLongPress ? (e) => { e.preventDefault(); onLongPress(e.clientX, e.clientY); } : undefined}
       className={className}
       style={{
         ...style,

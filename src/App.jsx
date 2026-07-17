@@ -224,6 +224,15 @@ export default function CloudStorageApp() {
   const [zippingName, setZippingName] = useState(null);
   const [linkCopied, setLinkCopied] = useState(false);
   const [viewer, setViewer] = useState(null);
+
+  useEffect(() => {
+    if (!viewer || viewer.type === "image") return; // ImageViewer handles its own Escape key
+    const handleKey = (e) => {
+      if (e.key === "Escape") setViewer(null);
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [viewer]);
   const [uploads, setUploads] = useState([]);
   const [uploadMinimized, setUploadMinimized] = useState(false);
   const [newMenuOpen, setNewMenuOpen] = useState(false);
@@ -1407,23 +1416,19 @@ export default function CloudStorageApp() {
       )}
 
       {viewer?.type === "video" && (
-        <div className="fixed inset-0 fade-in z-50 flex items-center justify-center bg-black/70 liquid-glass" onClick={() => setViewer(null)}>
-          <div className={`rounded-2xl w-full max-w-4xl overflow-hidden liquid-glass modal-anim border ${d.border} shadow-xl shadow-black/40`} style={{ background: d.modalBg }} onClick={(e) => e.stopPropagation()}>
-            <ViewerHeader name={viewer.item.name} onClose={() => setViewer(null)} d={d} onDownload={() => realDownload(viewer.item)} onShare={() => openShare(viewer.item)} />
-            <div className="flex items-center justify-center bg-black">
-              <MediaPreview item={viewer.item} authUser={authUser} mode="video" />
-            </div>
+        <div className="fixed inset-0 z-50 fade-in flex flex-col bg-zinc-950">
+          <ViewerHeader name={viewer.item.name} sub={`${viewer.item.size} · ${viewer.item.uploaded}`} onClose={() => setViewer(null)} onDownload={() => realDownload(viewer.item)} onShare={() => openShare(viewer.item)} />
+          <div className="flex-1 min-h-0 flex items-center justify-center bg-black">
+            <MediaPreview item={viewer.item} authUser={authUser} mode="video" />
           </div>
         </div>
       )}
 
       {viewer?.type === "pdf" && (
-        <div className="fixed inset-0 fade-in z-50 flex items-center justify-center bg-black/70 liquid-glass" onClick={() => setViewer(null)}>
-          <div className={`rounded-2xl w-full max-w-4xl flex flex-col overflow-hidden liquid-glass modal-anim border ${d.border} shadow-xl shadow-black/40`} style={{ background: d.modalBg, maxHeight: "88vh" }} onClick={(e) => e.stopPropagation()}>
-            <ViewerHeader name={viewer.item.name} onClose={() => setViewer(null)} d={d} onDownload={() => realDownload(viewer.item)} onShare={() => openShare(viewer.item)} />
-            <div className="flex-1 overflow-y-auto no-scrollbar p-4 bg-black/20">
-              <MediaPreview item={viewer.item} authUser={authUser} mode="pdf" />
-            </div>
+        <div className="fixed inset-0 z-50 fade-in flex flex-col bg-zinc-950">
+          <ViewerHeader name={viewer.item.name} sub={`${viewer.item.size} · ${viewer.item.uploaded}`} onClose={() => setViewer(null)} onDownload={() => realDownload(viewer.item)} onShare={() => openShare(viewer.item)} />
+          <div className="flex-1 min-h-0 overflow-hidden flex items-center justify-center bg-zinc-800">
+            <MediaPreview item={viewer.item} authUser={authUser} mode="pdf" />
           </div>
         </div>
       )}
@@ -1899,21 +1904,28 @@ function DetailRow({ label, value, d }) {
   );
 }
 
-function ViewerHeader({ name, sub, onClose, d, onDownload, onShare }) {
+function ViewerHeader({ name, sub, onClose, onDownload, onShare }) {
   return (
-    <div className={`flex items-center justify-between px-5 py-3.5 border-b ${d.divider}`}>
-      <div>
-        <p className={`text-sm font-medium ${d.textPrimary}`}>{name}</p>
-        {sub && <p className={`text-xs font-mono mt-0.5 ${d.textMuted}`}>{sub}</p>}
+    <div className="flex items-center justify-between gap-4 px-3 md:px-5 py-3 bg-zinc-900/90 border-b border-white/10 shrink-0">
+      <div className="flex items-center gap-2 md:gap-3 min-w-0">
+        <button onClick={onClose} className="w-9 h-9 rounded-full flex items-center justify-center text-zinc-300 hover:bg-white/10 hover:text-white active:scale-90 transition shrink-0">
+          <ArrowLeft size={18} />
+        </button>
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-white truncate">{name}</p>
+          {sub && <p className="text-xs text-zinc-400 truncate">{sub}</p>}
+        </div>
       </div>
-      <div className="flex items-center gap-3">
-        <button onClick={onDownload} className={`${d.textMuted} hover:text-orange-400 transition`}>
-          <Download size={16} />
+      <div className="flex items-center gap-1 shrink-0">
+        <button onClick={onDownload} title="Download" className="w-9 h-9 rounded-full flex items-center justify-center text-zinc-300 hover:bg-white/10 hover:text-white active:scale-90 transition">
+          <Download size={18} />
         </button>
-        <button onClick={onShare} className={`${d.textMuted} hover:text-orange-400 transition`}>
-          <Share2 size={16} />
+        <button onClick={onShare} title="Share" className="w-9 h-9 rounded-full flex items-center justify-center text-zinc-300 hover:bg-white/10 hover:text-white active:scale-90 transition">
+          <Share2 size={18} />
         </button>
-        <button onClick={onClose} className={`${d.textMuted} hover:text-orange-400 active:scale-90 transition`}><X size={18} /></button>
+        <button onClick={onClose} title="Close" className="w-9 h-9 rounded-full flex items-center justify-center text-zinc-300 hover:bg-white/10 hover:text-white active:scale-90 transition">
+          <X size={20} />
+        </button>
       </div>
     </div>
   );
@@ -1960,8 +1972,8 @@ function MediaPreview({ item, authUser, mode }) {
         src={previewUrl}
         controls
         autoPlay
-        className="max-w-full w-full block"
-        style={{ maxHeight: "80vh" }}
+        className="max-w-full max-h-full"
+        style={{ objectFit: "contain" }}
       />
     );
   }
@@ -1969,13 +1981,12 @@ function MediaPreview({ item, authUser, mode }) {
     <iframe
       src={previewUrl}
       title={item.name}
-      className="w-full bg-white rounded-lg border-0"
-      style={{ height: "80vh" }}
+      className="w-full h-full bg-white border-0"
     />
   );
 }
 
-function ImageViewer({ items, index, onIndex, onClose, d, authUser, onDownload, onShare }) {
+function ImageViewer({ items, index, onIndex, onClose, authUser, onDownload, onShare }) {
   const item = items[index];
   const [previewUrl, setPreviewUrl] = useState(null);
   const [loadError, setLoadError] = useState(false);
@@ -1996,29 +2007,48 @@ function ImageViewer({ items, index, onIndex, onClose, d, authUser, onDownload, 
     };
   }, [item.id]);
 
+  useEffect(() => {
+    const handleKey = (e) => {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowLeft" && index > 0) onIndex(index - 1);
+      else if (e.key === "ArrowRight" && index < items.length - 1) onIndex(index + 1);
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [index, items.length]);
+
   return (
-    <div className="fixed inset-0 fade-in z-50 flex items-center justify-center bg-black/75 liquid-glass" onClick={onClose}>
-      <div className={`rounded-2xl w-full max-w-5xl overflow-hidden liquid-glass modal-anim border ${d.border} shadow-xl shadow-black/40`} style={{ background: d.modalBg }} onClick={(e) => e.stopPropagation()}>
-        <ViewerHeader name={item.name} sub={`${item.size} · ${item.uploaded}`} onClose={onClose} d={d} onDownload={() => onDownload(item)} onShare={() => onShare(item)} />
-        <div className={`flex items-center justify-center relative bg-gradient-to-br ${d.mediaGradient}`} style={{ minHeight: "50vh", maxHeight: "80vh" }}>
-          {index > 0 && (
-            <button onClick={() => onIndex(index - 1)} className="absolute left-3 w-9 h-9 rounded-full flex items-center justify-center text-white bg-black/40 hover:bg-black/60 transition">
-              <ChevronLeft size={18} />
-            </button>
-          )}
-          {loadError ? (
-            <ImageIcon size={40} className={d.placeholderText} />
-          ) : previewUrl ? (
-            <img src={previewUrl} alt={item.name} className="max-w-full object-contain" style={{ maxHeight: "80vh" }} />
-          ) : (
-            <Loader2 size={28} className={`animate-spin ${d.placeholderText}`} />
-          )}
-          {index < items.length - 1 && (
-            <button onClick={() => onIndex(index + 1)} className="absolute right-3 w-9 h-9 rounded-full flex items-center justify-center text-white bg-black/40 hover:bg-black/60 transition">
-              <ChevronRight size={18} />
-            </button>
-          )}
-        </div>
+    <div className="fixed inset-0 z-50 fade-in flex flex-col bg-zinc-950">
+      <ViewerHeader name={item.name} sub={`${item.size} · ${item.uploaded}`} onClose={onClose} onDownload={() => onDownload(item)} onShare={() => onShare(item)} />
+      <div className="flex-1 min-h-0 relative flex items-center justify-center overflow-hidden" onClick={onClose}>
+        {index > 0 && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onIndex(index - 1); }}
+            className="absolute left-2 md:left-6 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full flex items-center justify-center text-white bg-white/10 hover:bg-white/20 backdrop-blur transition"
+          >
+            <ChevronLeft size={22} />
+          </button>
+        )}
+        {loadError ? (
+          <ImageIcon size={40} className="text-zinc-600" />
+        ) : previewUrl ? (
+          <img
+            src={previewUrl}
+            alt={item.name}
+            className="max-w-full max-h-full object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <Loader2 size={28} className="animate-spin text-zinc-600" />
+        )}
+        {index < items.length - 1 && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onIndex(index + 1); }}
+            className="absolute right-2 md:right-6 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full flex items-center justify-center text-white bg-white/10 hover:bg-white/20 backdrop-blur transition"
+          >
+            <ChevronRight size={22} />
+          </button>
+        )}
       </div>
     </div>
   );

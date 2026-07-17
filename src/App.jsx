@@ -234,6 +234,10 @@ export default function CloudStorageApp() {
   const fileInputRef = useRef(null);
   const folderNameRef = useRef(null);
 
+  // ── Folder navigation ───────────────────────────────────────
+  const [currentFolderId, setCurrentFolderId] = useState("root");
+  const [folderPath, setFolderPath] = useState([]); // [{ id, name }, ...] from root down
+
   // Hidden vault (secret entry: tap the logo 5x quickly)
   const [logoTaps, setLogoTaps] = useState(0);
   const [vaultPromptOpen, setVaultPromptOpen] = useState(false);
@@ -377,7 +381,10 @@ export default function CloudStorageApp() {
     setItemsLoading(true);
     setItemsError("");
     try {
-      const data = await apiRequest("GET", "/items", authUser.idToken);
+      const path = activeNav === "starred"
+        ? "/items?scope=starred"
+        : `/items?folderId=${encodeURIComponent(currentFolderId)}`;
+      const data = await apiRequest("GET", path, authUser.idToken);
       const allItems = data.items || [];
       setPinnedIds(new Set(allItems.filter((i) => i.pinned).map((i) => i.itemId)));
       setFolders(
@@ -405,14 +412,32 @@ export default function CloudStorageApp() {
 
   useEffect(() => {
     if (authUser) fetchItems();
-  }, [authUser]);
+  }, [authUser, currentFolderId, activeNav]);
+
+  const openFolder = (item) => {
+    setFolderPath((prev) => [...prev, { id: item.id, name: item.name }]);
+    setCurrentFolderId(item.id);
+    setSearchQuery("");
+  };
+
+  const goToBreadcrumb = (index) => {
+    // index === -1 means "My Files" root
+    if (index === -1) {
+      setFolderPath([]);
+      setCurrentFolderId("root");
+    } else {
+      setFolderPath((prev) => prev.slice(0, index + 1));
+      setCurrentFolderId(folderPath[index].id);
+    }
+    setSearchQuery("");
+  };
 
   const realCreateFolder = async (name) => {
-    const data = await apiRequest("POST", "/folders", authUser.idToken, { name });
+    const data = await apiRequest("POST", "/folders", authUser.idToken, { name, parentId: currentFolderId });
     setFolders((prev) => [{ ...data.item, id: data.item.itemId, meta: "just now" }, ...prev]);
   };
 
-  const realUpload = async (file) => {
+  const realUpload = async (file, targetFolderId = currentFolderId) => {
     const uploadId = "u" + Date.now() + Math.random();
     setUploads((prev) => [...prev, { id: uploadId, name: file.name, progress: 0 }]);
     try {
@@ -420,6 +445,7 @@ export default function CloudStorageApp() {
         fileName: file.name,
         fileType: file.type,
         size: file.size,
+        parentId: targetFolderId,
       });
 
       await new Promise((resolve, reject) => {
@@ -438,10 +464,15 @@ export default function CloudStorageApp() {
       });
 
       setUploads((prev) => prev.map((u) => (u.id === uploadId ? { ...u, progress: 100 } : u)));
-      setFiles((prev) => [
-        { ...item, id: item.itemId, sizeBytes: file.size, size: `${(file.size / 1024 / 1024).toFixed(1)} MB`, uploaded: "just now" },
-        ...prev,
-      ]);
+      // Only show the new file in the list if it landed in the folder we're
+      // currently looking at - if it was dropped onto a different folder
+      // tile, it belongs there instead.
+      if (targetFolderId === currentFolderId) {
+        setFiles((prev) => [
+          { ...item, id: item.itemId, sizeBytes: file.size, size: `${(file.size / 1024 / 1024).toFixed(1)} MB`, uploaded: "just now" },
+          ...prev,
+        ]);
+      }
     } catch (err) {
       setUploads((prev) => prev.filter((u) => u.id !== uploadId));
       alert(`Upload failed: ${err.message}`);
@@ -485,6 +516,8 @@ export default function CloudStorageApp() {
     setAccountView(false);
     setVaultUnlocked(false);
     setMobileNavOpen(false);
+    setFolderPath([]);
+    setCurrentFolderId("root");
   };
 
   const totalStorageBytes = files.reduce((sum, f) => sum + (f.sizeBytes || 0), 0);
@@ -608,13 +641,16 @@ export default function CloudStorageApp() {
   };
 
   const openItem = (item) => {
-    if (item.type === "image") setViewer({ type: "image", item, index: imageItems.findIndex((f) => f.id === item.id) });
+    if (item.type === "folder") openFolder(item);
+    else if (item.type === "image") setViewer({ type: "image", item, index: imageItems.findIndex((f) => f.id === item.id) });
     else if (item.type === "video") { setVideoPlaying(false); setViewer({ type: "video", item }); }
     else if (item.type === "pdf") setViewer({ type: "pdf", item });
   };
 
   const activeUploads = uploads.filter((u) => u.progress < 100).length;
-  const currentPageLabel = NAV.find((n) => n.id === activeNav)?.label || "My Files";
+  const currentPageLabel = folderPath.length > 0
+    ? folderPath[folderPath.length - 1].name
+    : NAV.find((n) => n.id === activeNav)?.label || "My Files";
 
   if (!authUser) {
     return <LoginScreen d={d} theme={theme} setTheme={setTheme} onLogin={handleLogin} />;
@@ -846,7 +882,29 @@ export default function CloudStorageApp() {
           </div>
 
           <div className="flex items-center justify-between px-6 py-4">
-            <h1 className={`hidden md:block text-xl font-bold ${d.textPrimary}`}>{accountView ? "Your Account" : currentPageLabel}</h1>
+            {!accountView && activeNav === "files" && folderPath.length > 0 ? (
+              <div className="hidden md:flex items-center gap-1.5 text-xl font-bold flex-wrap">
+                <button
+                  onClick={() => goToBreadcrumb(-1)}
+                  className={`${d.textMuted} hover:text-orange-400 transition`}
+                >
+                  My Files
+                </button>
+                {folderPath.map((f, i) => (
+                  <span key={f.id} className="flex items-center gap-1.5">
+                    <span className={d.textFaint}>/</span>
+                    <button
+                      onClick={() => goToBreadcrumb(i)}
+                      className={i === folderPath.length - 1 ? d.textPrimary : `${d.textMuted} hover:text-orange-400 transition`}
+                    >
+                      {f.name}
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <h1 className={`hidden md:block text-xl font-bold ${d.textPrimary}`}>{accountView ? "Your Account" : currentPageLabel}</h1>
+            )}
           </div>
 
           <div className="flex-1 overflow-y-auto no-scrollbar px-6 pb-6">
@@ -959,6 +1017,10 @@ export default function CloudStorageApp() {
                           key={item.id}
                           onClick={() => openItem(item)}
                           onLongPress={(x, y) => openMenuAt(x - 190, y + 10, item)}
+                          onFileDrop={(droppedFiles) => {
+                            setUploadMinimized(false);
+                            droppedFiles.forEach((file) => realUpload(file, item.id));
+                          }}
                           className={`flex items-center gap-2.5 rounded-xl px-3 py-2.5 transition cursor-pointer group relative border ${d.border} ${d.borderHover}`}
                           style={{ background: d.tiltBg }}
                         >
@@ -1593,7 +1655,7 @@ function LoginScreen({ d, theme, setTheme, onLogin }) {
   );
 }
 
-function TiltCard({ children, className, style, onClick, onLongPress }) {
+function TiltCard({ children, className, style, onClick, onLongPress, onFileDrop }) {
   const ref = useRef(null);
   const [rot, setRot] = useState({ x: 0, y: 0 });
   const target = useRef({ x: 0, y: 0 });
@@ -1601,6 +1663,42 @@ function TiltCard({ children, className, style, onClick, onLongPress }) {
   const rafRef = useRef(null);
   const pressTimer = useRef(null);
   const longPressed = useRef(false);
+  const [isDropTarget, setIsDropTarget] = useState(false);
+  const dropCounterRef = useRef(0);
+
+  const handleDragEnter = (e) => {
+    if (!onFileDrop) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.types.includes("Files")) {
+      dropCounterRef.current += 1;
+      setIsDropTarget(true);
+    }
+  };
+
+  const handleDragOverTarget = (e) => {
+    if (!onFileDrop) return;
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDragLeaveTarget = (e) => {
+    if (!onFileDrop) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dropCounterRef.current = Math.max(0, dropCounterRef.current - 1);
+    if (dropCounterRef.current === 0) setIsDropTarget(false);
+  };
+
+  const handleDropTarget = (e) => {
+    if (!onFileDrop) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dropCounterRef.current = 0;
+    setIsDropTarget(false);
+    const droppedFiles = Array.from(e.dataTransfer.files || []);
+    if (droppedFiles.length > 0) onFileDrop(droppedFiles);
+  };
 
   useEffect(() => {
     const stiffness = 240;
@@ -1674,7 +1772,11 @@ function TiltCard({ children, className, style, onClick, onLongPress }) {
       onMouseDown={onLongPress ? handlePressStart : undefined}
       onMouseUp={onLongPress ? clearPressTimer : undefined}
       onContextMenu={onLongPress ? (e) => { e.preventDefault(); onLongPress(e.clientX, e.clientY); } : undefined}
-      className={className}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOverTarget}
+      onDragLeave={handleDragLeaveTarget}
+      onDrop={handleDropTarget}
+      className={`${className}${isDropTarget ? " ring-2 ring-orange-400" : ""}`}
       style={{
         ...style,
         transform: `perspective(1100px) rotateX(${rot.x}deg) rotateY(${rot.y}deg)`,

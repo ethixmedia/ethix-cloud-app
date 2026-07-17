@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+addimport { useState, useEffect, useRef } from "react";
 import {
   Folder, FolderPlus, Image as ImageIcon, Film, FileText, FileSpreadsheet,
   Search, LayoutGrid, List, MoreVertical, Upload, HardDrive, Star, Clock,
@@ -1408,23 +1408,10 @@ export default function CloudStorageApp() {
 
       {viewer?.type === "video" && (
         <div className="fixed inset-0 fade-in z-50 flex items-center justify-center bg-black/70 liquid-glass" onClick={() => setViewer(null)}>
-          <div className={`rounded-2xl w-full max-w-2xl overflow-hidden liquid-glass modal-anim border ${d.border} shadow-xl shadow-black/40`} style={{ background: d.modalBg }} onClick={(e) => e.stopPropagation()}>
+          <div className={`rounded-2xl w-full max-w-4xl overflow-hidden liquid-glass modal-anim border ${d.border} shadow-xl shadow-black/40`} style={{ background: d.modalBg }} onClick={(e) => e.stopPropagation()}>
             <ViewerHeader name={viewer.item.name} onClose={() => setViewer(null)} d={d} onDownload={() => realDownload(viewer.item)} onShare={() => openShare(viewer.item)} />
-            <div className="aspect-video flex items-center justify-center relative bg-gradient-to-br from-zinc-900 to-black">
-              <button onClick={() => setVideoPlaying((p) => !p)} className="w-16 h-16 rounded-full flex items-center justify-center bg-white/10 hover:bg-white/20 transition">
-                {videoPlaying ? <Pause size={26} className="text-white" fill="white" /> : <Play size={26} className="text-white ml-1" fill="white" />}
-              </button>
-            </div>
-            <div className={`flex items-center gap-3 px-5 py-3 border-t ${d.divider}`}>
-              <button onClick={() => setVideoPlaying((p) => !p)} className={d.textMuted}>
-                {videoPlaying ? <Pause size={16} /> : <Play size={16} />}
-              </button>
-              <div className={`flex-1 h-1 rounded-full overflow-hidden ${d.inputBg}`}>
-                <div className="h-full rounded-full bg-orange-500" style={{ width: videoPlaying ? "38%" : "0%", transition: "width 1s linear" }} />
-              </div>
-              <span className={`text-xs font-mono ${d.textMuted}`}>2:14 / 5:40</span>
-              <Volume2 size={16} className={d.textMuted} />
-              <Maximize2 size={16} className={d.textMuted} />
+            <div className="flex items-center justify-center bg-black">
+              <MediaPreview item={viewer.item} authUser={authUser} mode="video" />
             </div>
           </div>
         </div>
@@ -1432,14 +1419,10 @@ export default function CloudStorageApp() {
 
       {viewer?.type === "pdf" && (
         <div className="fixed inset-0 fade-in z-50 flex items-center justify-center bg-black/70 liquid-glass" onClick={() => setViewer(null)}>
-          <div className={`rounded-2xl w-full max-w-xl flex flex-col overflow-hidden liquid-glass modal-anim border ${d.border} shadow-xl shadow-black/40`} style={{ background: d.modalBg, maxHeight: "85vh" }} onClick={(e) => e.stopPropagation()}>
-            <ViewerHeader name={viewer.item.name} sub="Page 1 of 12" onClose={() => setViewer(null)} d={d} onDownload={() => realDownload(viewer.item)} onShare={() => openShare(viewer.item)} />
-            <div className="flex-1 overflow-y-auto no-scrollbar p-6 flex justify-center bg-black/20">
-              <div className="bg-white rounded-lg w-full max-w-sm p-6 flex flex-col gap-2.5 h-fit shadow-2xl">
-                {[95, 88, 92, 60, 0, 90, 84, 70, 0, 80, 55].map((w, i) =>
-                  w === 0 ? <div key={i} className="h-3" /> : <div key={i} className="h-2.5 rounded-full bg-slate-200" style={{ width: `${w}%` }} />
-                )}
-              </div>
+          <div className={`rounded-2xl w-full max-w-4xl flex flex-col overflow-hidden liquid-glass modal-anim border ${d.border} shadow-xl shadow-black/40`} style={{ background: d.modalBg, maxHeight: "88vh" }} onClick={(e) => e.stopPropagation()}>
+            <ViewerHeader name={viewer.item.name} onClose={() => setViewer(null)} d={d} onDownload={() => realDownload(viewer.item)} onShare={() => openShare(viewer.item)} />
+            <div className="flex-1 overflow-y-auto no-scrollbar p-4 bg-black/20">
+              <MediaPreview item={viewer.item} authUser={authUser} mode="pdf" />
             </div>
           </div>
         </div>
@@ -1936,6 +1919,62 @@ function ViewerHeader({ name, sub, onClose, d, onDownload, onShare }) {
   );
 }
 
+function MediaPreview({ item, authUser, mode }) {
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [loadError, setLoadError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPreviewUrl(null);
+    setLoadError(false);
+    apiRequest("GET", `/download-url/${item.itemId || item.id}?mode=preview`, authUser.idToken)
+      .then((data) => {
+        if (!cancelled) setPreviewUrl(data.downloadUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setLoadError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [item.id]);
+
+  if (loadError) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-2 py-20">
+        {mode === "video" ? <Film size={32} className="text-red-400" /> : <FileText size={32} className="text-red-400" />}
+        <p className="text-sm text-red-400">Could not load preview</p>
+      </div>
+    );
+  }
+  if (!previewUrl) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 size={28} className="animate-spin text-zinc-400" />
+      </div>
+    );
+  }
+  if (mode === "video") {
+    return (
+      <video
+        src={previewUrl}
+        controls
+        autoPlay
+        className="max-w-full w-full block"
+        style={{ maxHeight: "80vh" }}
+      />
+    );
+  }
+  return (
+    <iframe
+      src={previewUrl}
+      title={item.name}
+      className="w-full bg-white rounded-lg border-0"
+      style={{ height: "80vh" }}
+    />
+  );
+}
+
 function ImageViewer({ items, index, onIndex, onClose, d, authUser, onDownload, onShare }) {
   const item = items[index];
   const [previewUrl, setPreviewUrl] = useState(null);
@@ -1959,9 +1998,9 @@ function ImageViewer({ items, index, onIndex, onClose, d, authUser, onDownload, 
 
   return (
     <div className="fixed inset-0 fade-in z-50 flex items-center justify-center bg-black/75 liquid-glass" onClick={onClose}>
-      <div className={`rounded-2xl w-full max-w-2xl overflow-hidden liquid-glass modal-anim border ${d.border} shadow-xl shadow-black/40`} style={{ background: d.modalBg }} onClick={(e) => e.stopPropagation()}>
+      <div className={`rounded-2xl w-full max-w-5xl overflow-hidden liquid-glass modal-anim border ${d.border} shadow-xl shadow-black/40`} style={{ background: d.modalBg }} onClick={(e) => e.stopPropagation()}>
         <ViewerHeader name={item.name} sub={`${item.size} · ${item.uploaded}`} onClose={onClose} d={d} onDownload={() => onDownload(item)} onShare={() => onShare(item)} />
-        <div className={`aspect-[4/3] flex items-center justify-center relative bg-gradient-to-br ${d.mediaGradient}`}>
+        <div className={`flex items-center justify-center relative bg-gradient-to-br ${d.mediaGradient}`} style={{ minHeight: "50vh", maxHeight: "80vh" }}>
           {index > 0 && (
             <button onClick={() => onIndex(index - 1)} className="absolute left-3 w-9 h-9 rounded-full flex items-center justify-center text-white bg-black/40 hover:bg-black/60 transition">
               <ChevronLeft size={18} />
@@ -1970,7 +2009,7 @@ function ImageViewer({ items, index, onIndex, onClose, d, authUser, onDownload, 
           {loadError ? (
             <ImageIcon size={40} className={d.placeholderText} />
           ) : previewUrl ? (
-            <img src={previewUrl} alt={item.name} className="max-w-full max-h-full object-contain" />
+            <img src={previewUrl} alt={item.name} className="max-w-full object-contain" style={{ maxHeight: "80vh" }} />
           ) : (
             <Loader2 size={28} className={`animate-spin ${d.placeholderText}`} />
           )}
